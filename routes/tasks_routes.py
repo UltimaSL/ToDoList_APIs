@@ -1,48 +1,46 @@
 # ToDoList_APIs/routes/tasks_routes.py
 
 from flask import Blueprint, request, jsonify
-from bson.objectid import ObjectId # Para manejar IDs de MongoDB
+from pymongo import MongoClient
+from bson.objectid import ObjectId
 
 # Creamos un Blueprint para las rutas de tareas
 tasks_bp = Blueprint('tasks_bp', __name__)
 
-# Necesitamos acceso a la colección de tareas y a usuarios si se requiere validar el ID
-# Los inicializaremos a través de una función de inicialización del Blueprint
+# Variables globales para las colecciones, se inicializarán desde app.py
+tasks_collection = None
+users_collection = None
+
 def init_tasks_routes(tasks_collection_ref, users_collection_ref):
     global tasks_collection, users_collection
     tasks_collection = tasks_collection_ref
-    users_collection = users_collection_ref # Por si necesitamos validar el id_usuario
+    users_collection = users_collection_ref
 
-# 3. Endpoint Guardar (para agregar o actualizar tareas)
+# Endpoint para guardar/actualizar tareas
 @tasks_bp.route('/tasks', methods=['POST'])
 def save_task():
     data = request.get_json()
-    id_usuario = data.get('id_usuario') # El ID del usuario al que pertenece la tarea
+    id_usuario = data.get('id_usuario')
     notas_usuario = data.get('notas_usuario')
-    etiqueta = data.get('etiqueta', '') # Etiqueta es opcional, por defecto vacía
-    id_tarea = data.get('id_tarea') # Si se proporciona, es una actualización
+    etiqueta = data.get('etiqueta', '')
+    is_done = data.get('is_done', False) # <-- AÑADIDO: Campo is_done (por defecto False)
+    id_tarea = data.get('id_tarea')
 
     if not all([id_usuario, notas_usuario]):
         return jsonify({"message": "Faltan campos obligatorios (id_usuario, notas_usuario)"}), 400
 
-    # Opcional: Verificar si el id_usuario existe
-    # if not users_collection.find_one({"_id": ObjectId(id_usuario)}):
-    #     return jsonify({"message": "Usuario no encontrado"}), 404
-
-    # Crear el documento de la tarea
     task_document = {
-        "id_usuario": ObjectId(id_usuario), # Asegúrate de que el ID del usuario sea un ObjectId
+        "id_usuario": ObjectId(id_usuario),
         "notas_usuario": notas_usuario,
-        "etiqueta": etiqueta
+        "etiqueta": etiqueta,
+        "is_done": is_done # <-- AÑADIDO: Guardar el estado is_done
     }
 
-    if id_tarea: # Si se proporciona id_tarea, es una actualización
+    if id_tarea:
         try:
-            # Convertir id_tarea a ObjectId para buscar en MongoDB
             task_object_id = ObjectId(id_tarea)
-            # Actualizar la tarea existente
             result = tasks_collection.update_one(
-                {"_id": task_object_id, "id_usuario": ObjectId(id_usuario)}, # Asegurar que el usuario sea dueño de la tarea
+                {"_id": task_object_id, "id_usuario": ObjectId(id_usuario)},
                 {"$set": task_document}
             )
             if result.matched_count == 0:
@@ -50,26 +48,25 @@ def save_task():
             return jsonify({"message": "Tarea actualizada exitosamente", "id_tarea": id_tarea}), 200
         except Exception:
             return jsonify({"message": "ID de tarea inválido"}), 400
-    else: # Si no se proporciona id_tarea, es una nueva tarea
-        # Insertar la nueva tarea
+    else:
         result = tasks_collection.insert_one(task_document)
         return jsonify({"message": "Tarea guardada exitosamente", "id_tarea": str(result.inserted_id)}), 201
 
-# Nuevo Endpoint: Obtener todas las tareas para un usuario
+# Endpoint para obtener todas las tareas para un usuario
 @tasks_bp.route('/tasks/user/<string:user_id>', methods=['GET'])
 def get_tasks_by_user(user_id):
     try:
         user_object_id = ObjectId(user_id)
         
-        # Buscar todas las tareas que pertenecen a este user_id
-        # El .sort([("_id", -1)]) es opcional y ordena las tareas por las más recientes primero
         tasks_cursor = tasks_collection.find({"id_usuario": user_object_id}).sort([("_id", -1)])
         
         tasks_list = []
         for task in tasks_cursor:
-            # Convertir ObjectId a string para que sea JSON serializable
             task['_id'] = str(task['_id'])
             task['id_usuario'] = str(task['id_usuario'])
+            # <-- AÑADIDO: Asegurarse de que is_done esté presente para todas las tareas
+            # Si una tarea antigua no tiene 'is_done', se le asigna False por defecto al devolverla
+            task['is_done'] = task.get('is_done', False) 
             tasks_list.append(task)
         
         if not tasks_list:
@@ -79,12 +76,9 @@ def get_tasks_by_user(user_id):
     except Exception as e:
         return jsonify({"message": f"ID de usuario inválido o error en el servidor: {e}"}), 400
 
-
-# 4. Endpoint Borrado
+# Endpoint Borrado
 @tasks_bp.route('/tasks/<string:id_tarea>', methods=['DELETE'])
 def delete_task(id_tarea):
-    # En una aplicación real, también verificarías el id_usuario para asegurar que el usuario
-    # solo pueda borrar sus propias tareas. Por ahora, solo borraremos por id_tarea.
     try:
         task_object_id = ObjectId(id_tarea)
         result = tasks_collection.delete_one({"_id": task_object_id})
