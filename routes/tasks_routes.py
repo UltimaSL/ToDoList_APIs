@@ -1,7 +1,7 @@
 # ToDoList_APIs/routes/tasks_routes.py
 
 from flask import Blueprint, request, jsonify
-from bson.objectid import ObjectId # Para convertir strings a ObjectId de MongoDB
+from bson.objectid import ObjectId # Para manejar IDs de MongoDB
 
 # Creamos un Blueprint para las rutas de tareas
 tasks_bp = Blueprint('tasks_bp', __name__)
@@ -54,6 +54,31 @@ def save_task():
         # Insertar la nueva tarea
         result = tasks_collection.insert_one(task_document)
         return jsonify({"message": "Tarea guardada exitosamente", "id_tarea": str(result.inserted_id)}), 201
+
+# Nuevo Endpoint: Obtener todas las tareas para un usuario
+@tasks_bp.route('/tasks/user/<string:user_id>', methods=['GET'])
+def get_tasks_by_user(user_id):
+    try:
+        user_object_id = ObjectId(user_id)
+        
+        # Buscar todas las tareas que pertenecen a este user_id
+        # El .sort([("_id", -1)]) es opcional y ordena las tareas por las más recientes primero
+        tasks_cursor = tasks_collection.find({"id_usuario": user_object_id}).sort([("_id", -1)])
+        
+        tasks_list = []
+        for task in tasks_cursor:
+            # Convertir ObjectId a string para que sea JSON serializable
+            task['_id'] = str(task['_id'])
+            task['id_usuario'] = str(task['id_usuario'])
+            tasks_list.append(task)
+        
+        if not tasks_list:
+            return jsonify({"message": "No hay tareas para este usuario"}), 404
+        
+        return jsonify(tasks_list), 200
+    except Exception as e:
+        return jsonify({"message": f"ID de usuario inválido o error en el servidor: {e}"}), 400
+
 
 # 4. Endpoint Borrado
 @tasks_bp.route('/tasks/<string:id_tarea>', methods=['DELETE'])

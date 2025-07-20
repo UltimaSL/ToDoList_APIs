@@ -48,4 +48,4 @@ def home():
     return "¡API de Lista de Tareas funcionando!"
 
 if __name__ == '__main__':
-    app.run(debug=True) # debug=True para desarrollo, cambiar a False en producción
+    app.run(host='0.0.0.0') # debug=True para desarrollo, cambiar a False en producción
